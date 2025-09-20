@@ -1,0 +1,43 @@
+// src/types/index.ts
+export interface User {
+  id: string;
+  username: string;
+  avatar: string;
+  isOnline: boolean;
+  lastSeen: Date;
+  createdAt: Date; // ← Agregar esta propiedad
+}
+
+export interface Message {
+  id: string;
+  content: string;
+  type: 'text' | 'file' | 'image';
+  userId: string;
+  user: User;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
+  createdAt: Date;
+}
+
+export interface FileInfo {
+  filename: string;
+  originalname: string;
+  size: number;
+  mimetype: string;
+  url: string;
+}
+
+export interface SocketUser extends User {
+  socketId: string;
+}
+
+// ← Agregar la interfaz Room que faltaba
+export interface Room {
+  id: string;
+  name: string;
+  description?: string;
+  isPrivate: boolean;
+  createdAt: Date;
+}
