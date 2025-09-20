@@ -120,9 +120,10 @@ app.get('/api/stats', (req, res) => {
 
 // Socket.IO eventos
 io.on('connection', (socket) => {
-  console.log('Usuario conectado:', socket.id);
+  console.log(`🔌 Nueva conexión WebSocket: ${socket.id}`);
 
   socket.on('join', async (userData: { username: string; avatar: string }) => {
+    console.log(`📥 Evento 'join' recibido de ${socket.id}:`, userData);
     try {
       // Buscar usuario existente
       let user = dataStore.findUserByUsername(userData.username);
@@ -152,18 +153,50 @@ io.on('connection', (socket) => {
       // Unirse a sala general
       socket.join('general');
 
-      // Notificar a todos los usuarios
-      const onlineUsers = Array.from(connectedUsers.values());
-      io.emit('userJoined', {
+      // 1. PRIMERO: Enviar datos iniciales al usuario que se conecta
+      const recentMessages = dataStore.getRecentMessages(50);
+      const currentOnlineUsers = Array.from(connectedUsers.values());
+      
+      // 🔍 DEBUG: Mostrar información detallada
+      console.log('\n=== DEBUG: INFORMACIÓN AL CONECTARSE ===');
+      console.log(`👤 Usuario conectándose: ${user.username} (${socket.id})`);
+      console.log(`📊 Total usuarios conectados: ${currentOnlineUsers.length}`);
+      console.log('👥 Lista de usuarios online:');
+      currentOnlineUsers.forEach((u, index) => {
+        console.log(`  ${index + 1}. ${u.username} (${u.socketId}) - Online: ${u.isOnline}`);
+      });
+      console.log(`📨 Mensajes recientes encontrados: ${recentMessages.length}`);
+      console.log('==========================================\n');
+      
+      // Enviar mensajes recientes al nuevo usuario
+      console.log(`📤 Enviando 'recentMessages' a ${user.username}: ${recentMessages.length} mensajes`);
+      socket.emit('recentMessages', recentMessages);
+      
+      // Enviar lista completa de usuarios online al nuevo usuario
+      console.log(`📤 Enviando 'onlineUsers' a ${user.username}: ${currentOnlineUsers.length} usuarios`);
+      socket.emit('onlineUsers', currentOnlineUsers);
+      
+      // Confirmar conexión exitosa al nuevo usuario
+      const joinSuccessData = {
         user: socketUser,
-        onlineUsers: onlineUsers
+        onlineUsers: currentOnlineUsers,
+        recentMessages: recentMessages
+      };
+      console.log(`📤 Enviando 'joinSuccess' a ${user.username}:`, {
+        user: socketUser.username,
+        onlineUsersCount: currentOnlineUsers.length,
+        recentMessagesCount: recentMessages.length
+      });
+      socket.emit('joinSuccess', joinSuccessData);
+
+      // 2. SEGUNDO: Notificar a OTROS usuarios (no al que se acaba de conectar)
+      console.log(`📢 Notificando 'userJoined' a otros usuarios en sala 'general'`);
+      socket.to('general').emit('userJoined', {
+        user: socketUser,
+        onlineUsers: currentOnlineUsers
       });
 
-      // Enviar mensajes recientes al usuario que se conecta
-      const recentMessages = dataStore.getRecentMessages(50);
-      socket.emit('recentMessages', recentMessages);
-
-      console.log(`✅ Usuario ${user.username} se unió al chat`);
+      console.log(`✅ Usuario ${user.username} se unió al chat exitosamente`);
 
     } catch (error) {
       console.error('Error joining chat:', error);
@@ -212,9 +245,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', async () => {
+    console.log(`🔌❌ Desconexión de socket: ${socket.id}`);
     try {
       const user = connectedUsers.get(socket.id);
       if (user) {
+        console.log(`👤❌ Usuario desconectándose: ${user.username}`);
+        
         // Actualizar estado offline
         dataStore.updateUser(user.id, {
           isOnline: false,
@@ -224,12 +260,16 @@ io.on('connection', (socket) => {
         connectedUsers.delete(socket.id);
 
         const onlineUsers = Array.from(connectedUsers.values());
+        console.log(`📊 Usuarios restantes online: ${onlineUsers.length}`);
+        
         io.emit('userLeft', {
           user: user,
           onlineUsers: onlineUsers
         });
 
         console.log(`❌ Usuario ${user.username} se desconectó`);
+      } else {
+        console.log(`⚠️ Socket ${socket.id} se desconectó pero no tenía usuario asociado`);
       }
     } catch (error) {
       console.error('Error handling disconnect:', error);
