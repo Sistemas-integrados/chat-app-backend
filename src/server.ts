@@ -120,10 +120,9 @@ app.get('/api/stats', (req, res) => {
 
 // Socket.IO eventos
 io.on('connection', (socket) => {
-  console.log(`🔌 Nueva conexión WebSocket: ${socket.id}`);
+  console.log('Usuario conectado:', socket.id);
 
   socket.on('join', async (userData: { username: string; avatar: string }) => {
-    console.log(`📥 Evento 'join' recibido de ${socket.id}:`, userData);
     try {
       // Buscar usuario existente
       let user = dataStore.findUserByUsername(userData.username);
@@ -157,23 +156,10 @@ io.on('connection', (socket) => {
       const recentMessages = dataStore.getRecentMessages(50);
       const currentOnlineUsers = Array.from(connectedUsers.values());
       
-      // 🔍 DEBUG: Mostrar información detallada
-      console.log('\n=== DEBUG: INFORMACIÓN AL CONECTARSE ===');
-      console.log(`👤 Usuario conectándose: ${user.username} (${socket.id})`);
-      console.log(`📊 Total usuarios conectados: ${currentOnlineUsers.length}`);
-      console.log('👥 Lista de usuarios online:');
-      currentOnlineUsers.forEach((u, index) => {
-        console.log(`  ${index + 1}. ${u.username} (${u.socketId}) - Online: ${u.isOnline}`);
-      });
-      console.log(`📨 Mensajes recientes encontrados: ${recentMessages.length}`);
-      console.log('==========================================\n');
-      
       // Enviar mensajes recientes al nuevo usuario
-      console.log(`📤 Enviando 'recentMessages' a ${user.username}: ${recentMessages.length} mensajes`);
       socket.emit('recentMessages', recentMessages);
       
       // Enviar lista completa de usuarios online al nuevo usuario
-      console.log(`📤 Enviando 'onlineUsers' a ${user.username}: ${currentOnlineUsers.length} usuarios`);
       socket.emit('onlineUsers', currentOnlineUsers);
       
       // Confirmar conexión exitosa al nuevo usuario
@@ -182,21 +168,15 @@ io.on('connection', (socket) => {
         onlineUsers: currentOnlineUsers,
         recentMessages: recentMessages
       };
-      console.log(`📤 Enviando 'joinSuccess' a ${user.username}:`, {
-        user: socketUser.username,
-        onlineUsersCount: currentOnlineUsers.length,
-        recentMessagesCount: recentMessages.length
-      });
       socket.emit('joinSuccess', joinSuccessData);
 
       // 2. SEGUNDO: Notificar a OTROS usuarios (no al que se acaba de conectar)
-      console.log(`📢 Notificando 'userJoined' a otros usuarios en sala 'general'`);
       socket.to('general').emit('userJoined', {
         user: socketUser,
         onlineUsers: currentOnlineUsers
       });
 
-      console.log(`✅ Usuario ${user.username} se unió al chat exitosamente`);
+      console.log(`✅ Usuario ${user.username} se unió al chat`);
 
     } catch (error) {
       console.error('Error joining chat:', error);
@@ -204,28 +184,72 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('sendMessage', async (messageData: {
-    content: string;
-    type: 'text' | 'file' | 'image';
-    file?: FileInfo;
-  }) => {
+  socket.on('sendMessage', async (messageData: any) => {
+    // 🔄 NORMALIZAR DATOS: Manejar diferentes formatos del frontend
+    let normalizedData: {
+      content: string;
+      type: 'text' | 'file' | 'image';
+      file?: FileInfo;
+    };
+    
+    if (messageData.text) {
+      // Formato del frontend actual: { text, user, timestamp, id }
+      normalizedData = {
+        content: String(messageData.text || ''), // Convertir a string y manejar undefined
+        type: messageData.type || 'text',
+        file: messageData.file
+      };
+    } else if (messageData.content) {
+      // Formato esperado: { content, type, file }
+      normalizedData = {
+        content: String(messageData.content || ''), // Convertir a string y manejar undefined
+        type: messageData.type || 'text',
+        file: messageData.file
+      };
+    } else {
+      console.log('❌ Sin text ni content:', messageData);
+      socket.emit('error', { message: 'Contenido del mensaje es requerido' });
+      return;
+    }
+    
+    // Validar datos normalizados
+    if (!normalizedData.content || typeof normalizedData.content !== 'string' || normalizedData.content.trim() === '') {
+      console.log('❌ Contenido inválido:', { 
+        hasContent: !!normalizedData.content, 
+        type: typeof normalizedData.content, 
+        value: normalizedData.content 
+      });
+      socket.emit('error', { message: 'Contenido del mensaje no puede estar vacío' });
+      return;
+    }
+    
     try {
       const user = connectedUsers.get(socket.id);
       if (!user) return;
 
       const message = dataStore.createMessage({
-        content: messageData.content,
-        type: messageData.type,
+        content: normalizedData.content,
+        type: normalizedData.type,
         userId: user.id,
-        fileUrl: messageData.file?.url,
-        fileName: messageData.file?.originalname,
-        fileSize: messageData.file?.size,
-        fileMimeType: messageData.file?.mimetype
+        fileUrl: normalizedData.file?.url,
+        fileName: normalizedData.file?.originalname,
+        fileSize: normalizedData.file?.size,
+        fileMimeType: normalizedData.file?.mimetype
       });
 
       if (message) {
         io.to('general').emit('newMessage', message);
-        console.log(`💬 Mensaje de ${user.username}: ${messageData.content.substring(0, 50)}...`);
+        // Log de debugging temporal para Render
+        console.log('🔍 Debug - normalizedData:', { 
+          hasContent: !!normalizedData?.content, 
+          contentType: typeof normalizedData?.content,
+          contentLength: normalizedData?.content?.length 
+        });
+        // Protección robusta para el log
+        const contentPreview = (normalizedData?.content && typeof normalizedData.content === 'string') 
+          ? normalizedData.content.substring(0, 50) 
+          : '[CONTENIDO NO VÁLIDO]';
+        console.log(`💬 Mensaje de ${user.username}: ${contentPreview}...`);
       }
 
     } catch (error) {
@@ -245,12 +269,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    console.log(`🔌❌ Desconexión de socket: ${socket.id}`);
     try {
       const user = connectedUsers.get(socket.id);
       if (user) {
-        console.log(`👤❌ Usuario desconectándose: ${user.username}`);
-        
         // Actualizar estado offline
         dataStore.updateUser(user.id, {
           isOnline: false,
@@ -260,7 +281,6 @@ io.on('connection', (socket) => {
         connectedUsers.delete(socket.id);
 
         const onlineUsers = Array.from(connectedUsers.values());
-        console.log(`📊 Usuarios restantes online: ${onlineUsers.length}`);
         
         io.emit('userLeft', {
           user: user,
@@ -268,8 +288,6 @@ io.on('connection', (socket) => {
         });
 
         console.log(`❌ Usuario ${user.username} se desconectó`);
-      } else {
-        console.log(`⚠️ Socket ${socket.id} se desconectó pero no tenía usuario asociado`);
       }
     } catch (error) {
       console.error('Error handling disconnect:', error);
@@ -280,7 +298,6 @@ io.on('connection', (socket) => {
 // Limpiar datos antiguos cada hora
 setInterval(() => {
   dataStore.cleanup();
-  console.log('🧹 Limpieza de datos completada');
 }, 60 * 60 * 1000);
 
 // Manejo de cierre graceful

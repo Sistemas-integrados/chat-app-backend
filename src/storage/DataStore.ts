@@ -137,13 +137,24 @@ class DataStore {
     fileSize?: number;
     fileMimeType?: string;
   }): Message | null {
+    // Validar datos requeridos
+    if (!messageData.content || typeof messageData.content !== 'string') {
+      return null;
+    }
+    
+    if (!messageData.userId) {
+      return null;
+    }
+    
     const user = this.users.get(messageData.userId);
-    if (!user) return null;
+    if (!user) {
+      return null;
+    }
 
     const message: Message = {
       id: require('uuid').v4(),
-      content: messageData.content,
-      type: messageData.type,
+      content: messageData.content.trim(),
+      type: messageData.type || 'text',
       userId: messageData.userId,
       user: user,
       fileUrl: messageData.fileUrl,
